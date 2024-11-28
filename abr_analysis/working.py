@@ -351,7 +351,6 @@ def plot_3d_surface(df, freq, y_min, y_max):
 
 # Put all important metrics data from this session into table
 def make_metrics_table(df, freqs, db_levels):
-    ru = 'μV'
     # Create empty dictionary for storing data
     metrics_data = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], 'Mouse Name': [], 'Timepoint': [],
                     'Frequency (Hz)': [], 'dB Level': [], 'Wave I amplitude (P1-T1) (μV)': [],
@@ -384,7 +383,7 @@ def make_metrics_table(df, freqs, db_levels):
                     metrics_data['Timepoint'].append(df.name.split('_')[4])
                     metrics_data['Frequency (Hz)'].append(freq)
                     metrics_data['dB Level'].append(db)
-                    metrics_data[f'Wave I amplitude (P1-T1) ({ru})'].append(first_peak_amplitude)
+                    metrics_data['Wave I amplitude (P1-T1) (μV)'].append(first_peak_amplitude)
                     metrics_data['Latency to First Peak (ms)'].append(latency_to_first_peak)
                     metrics_data['Amplitude Ratio (Peak1/Peak4)'].append(amplitude_ratio)
                     metrics_data['Estimated Threshold'].append(threshold)
@@ -516,6 +515,11 @@ def calculate_hearing_threshold(df, freq, baseline_level=100):
     lowest_db = db_levels[0]
     previous_prediction = None
 
+    # Don't accept threshold dB if any higher dBs have not been fit
+    for idx,p in enumerate(y_pred):
+        if p == 0:
+            y_pred[idx:-1] = 0
+
     for p, d in zip(y_pred, db_levels):
         if p == 0:
             if previous_prediction == 0:
@@ -524,6 +528,9 @@ def calculate_hearing_threshold(df, freq, baseline_level=100):
         else:
             lowest_db = d
             previous_prediction = p
+
+    if lowest_db == 0.0:
+        a = 1
 
     return lowest_db
 
@@ -664,14 +671,169 @@ if len(click_metrics_data['File Name']) > 0:
     metrics_data = pd.DataFrame(click_metrics_data)
     metrics_data.sort_values(by=['Mouse Name','Date'])
     metrics_data.to_csv(os.path.join(saveRoot, 'click_dataTable.csv'))
-    # Plot click thresholds over days
+    # Summary plots for click data
+    try: # just in case this crashes, still want to save the datasets
+        metrics_table = metrics_table.sort_values(['Mouse Name', 'Date'])
+        timepoints = metrics_table['Timepoint'].unique()
+        mouseNames = metrics_table['Mouse Name'].unique()
+        mouseColours = cc.glasbey[:len(mouseNames)]
+        timeColours = cc.glasbey_dark[:len(timepoints)]
+        # Extract and plot lick thresholds over time, one line per mouse
+        fig = go.Figure()
+        thresh = np.empty((len(timepoints), len(mouseNames)))
+        thresh[:] = np.nan
+        w1Mean = np.empty((len(timepoints), len(distinct_dbs)))
+        w1Err = np.empty((len(timepoints), len(distinct_dbs)))
+        for idx, mouse in enumerate(mouseNames):
+            for tix, tp in enumerate(timepoints):
+                yData = metrics_table[
+                    (metrics_table['Mouse Name'] == mouse) & (metrics_table['dB Level'] == np.max(distinct_dbs)) & (
+                                metrics_table['Timepoint'] == tp)]
+                if not yData['Estimated Threshold'].empty:
+                    thresh[tix, idx] = yData['Estimated Threshold']
+            # Add a thresholds line over days for each mouse
+            fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=thresh[:, idx], mode='lines',
+                                     showlegend=False, marker=dict(color=mouseColours[idx])))
+            fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=thresh[:, idx], mode='markers',
+                                     name=mouse, marker=dict(color=mouseColours[idx])))
+        # Mean thresholds line over days, with error bars
+        fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=np.nanmean(thresh, axis=1), mode='lines',
+                                 showlegend=False, marker=dict(color='black')))
+        fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=np.nanmean(thresh, axis=1), mode='markers',
+                                 name='Mean', marker=dict(color='black'),
+                                 error_y=dict(type='data', array=np.nanstd(thresh, axis=1), visible=True)))
+        # Update layout of click thresholds plot
+        fig.update_layout(width=700, height=450)
+        fig.update_layout(xaxis=dict(tickmode='array', tickvals=np.arange(len(mouseNames)), ticktext=timepoints))
+        fig.update_layout(xaxis_title='Time-point', yaxis_title='Hearing threshold (dB)',
+                          title='Click session thresholds over time')
+        fig.update_layout(yaxis_range=[np.min(distinct_dbs), np.max(distinct_dbs)])
+        fig.update_layout(font_family="Helvetica",
+                          font_color="black",
+                          title_font_family="Helvetica",
+                          font=dict(size=17))
+        # Extract and plot wave 1 amplitude over frequencies, one line per time-point
+        fig2 = go.Figure()
+        for tix, tp in enumerate(timepoints):
+            for idx, db in enumerate(distinct_dbs):
+                yData = metrics_table[(metrics_table['dB Level'] == db) & (metrics_table['Timepoint'] == tp)]
+                w1Mean[tix, idx] = np.nanmean(yData['Wave I amplitude (P1-T1) (μV)'])
+                w1Err[tix, idx] = np.nanstd(yData['Wave I amplitude (P1-T1) (μV)'])
+            fig2.add_trace(go.Scatter(x=np.arange(len(distinct_dbs)), y=w1Mean[tix, :], mode='lines',
+                                      showlegend=False, marker=dict(color=timeColours[tix])))
+            fig2.add_trace(go.Scatter(x=np.arange(len(distinct_dbs)), y=w1Mean[tix, :], mode='markers',
+                                      name=f'{tp}', marker=dict(color=timeColours[tix]),
+                                      error_y=dict(type='data', array=w1Err[tix, :], visible=True)))
+        fig2.update_layout(width=700, height=450)
+        fig2.update_layout(xaxis=dict(tickmode='array', tickvals=np.arange(len(distinct_dbs)), ticktext=distinct_dbs))
+        fig2.update_layout(xaxis_title='dB Level', yaxis_title='Wave 1 Amplitude (uV)',
+                           title=f'Click session wave 1 amplitudes over time')
+        fig2.update_layout(yaxis_range=[0, np.max(metrics_table['Wave I amplitude (P1-T1) (μV)'])])
+        fig2.update_layout(font_family="Helvetica",
+                           font_color="black",
+                           title_font_family="Helvetica",
+                           font=dict(size=17))
+
+        fig.write_image(os.path.join(saveRoot, 'click_thresholds_over_time.pdf'))
+        fig.write_image(os.path.join(saveRoot, 'click_thresholds_over_time.jpg'))
+        fig2.write_image(os.path.join(saveRoot, 'click_wave1_amplitude_over_time.pdf'))
+        fig2.write_image(os.path.join(saveRoot, 'click_wave1_amplitude_over_time.jpg'))
+    except:
+        print('Plotting over days failed')
 
 if len(pt_metrics_data['File Name']) > 0:
+    # Save concatenated data across all pure tone sessions
     metrics_data = pd.DataFrame(pt_metrics_data)
     metrics_data.sort_values(by=['Mouse Name','Date'])
     metrics_data.to_csv(os.path.join(saveRoot, 'pt_dataTable.csv'))
-    # Plot pure tone thresholds over days
 
+    # Summary plots for pure tone sessions
+    distinct_dbs = metrics_data['dB Level'].unique()
+    distinct_freqs = metrics_data['Frequency (Hz)'].unique()
+    metrics_table = metrics_data.sort_values(['Mouse Name', 'Date'])
+    timepoints = metrics_data['Timepoint'].unique()
+    mouseNames = metrics_data['Mouse Name'].unique()
+    mouseColours = cc.glasbey[:len(mouseNames)]
+    timeColours = cc.glasbey_dark[:len(timepoints)]
+    fig = make_subplots(rows=3, cols=2, subplot_titles=distinct_freqs)
+    fig2 = make_subplots(rows=3, cols=2, subplot_titles=distinct_freqs)
+    # Extract and plot lick thresholds over time, one line per mouse, one graph per frequency
+    for ii, freq in enumerate(distinct_freqs):
+        if np.remainder(ii, 2) == 0:
+            colIdx = 1
+        else:
+            colIdx = 2
+        if ii == 0:
+            legendOn = True
+        else:
+            legendOn = False
+        thresh = np.empty((len(timepoints), len(mouseNames)))
+        thresh[:] = np.nan
+        w1Mean = np.empty((len(timepoints), len(distinct_dbs)))
+        w1Err = np.empty((len(timepoints), len(distinct_dbs)))
+        for idx, mouse in enumerate(mouseNames):
+            for tix, tp in enumerate(timepoints):
+                yData = metrics_table[
+                    (metrics_table['Mouse Name'] == mouse) & (metrics_table['dB Level'] == np.max(distinct_dbs)) &
+                    (metrics_table['Timepoint'] == tp) & (metrics_table['Frequency (Hz)'] == freq)]
+                if not yData['Estimated Threshold'].empty:
+                    thresh[tix, idx] = yData['Estimated Threshold']
+            # Add a thresholds line over days for each mouse
+            fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=thresh[:, idx], mode='lines',
+                                     showlegend=False, marker=dict(color=mouseColours[idx])),
+                          row=int(np.ceil((ii + 1) / 2)), col=colIdx)
+            fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=thresh[:, idx], mode='markers',
+                                     name=mouse, marker=dict(color=mouseColours[idx]), showlegend=legendOn),
+                          row=int(np.ceil((ii + 1) / 2)), col=colIdx)
+        # Mean thresholds line over days, with error bars
+        fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=np.nanmean(thresh, axis=1), mode='lines',
+                                 showlegend=False, marker=dict(color='black')),
+                      row=int(np.ceil((ii + 1) / 2)), col=colIdx)
+        fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=np.nanmean(thresh, axis=1), mode='markers',
+                                 name='Mean', marker=dict(color='black'),
+                                 error_y=dict(type='data', array=np.nanstd(thresh, axis=1), visible=True),
+                                 showlegend=legendOn),
+                      row=int(np.ceil((ii + 1) / 2)), col=colIdx)
+        # Update layout of click thresholds plot
+        fig.update_layout(width=1200, height=700)
+        fig.update_xaxes(dict(tickmode='array', tickvals=np.arange(len(mouseNames)), ticktext=timepoints),
+                         title='Time-point')
+        fig.update_layout(title='Pure tone thresholds over time')
+        fig.update_yaxes(range=[np.min(distinct_dbs), np.max(distinct_dbs)], title='Hearing threshold (dB)')
+        fig.update_layout(font_family="Helvetica",
+                          font_color="black",
+                          title_font_family="Helvetica",
+                          font=dict(size=17))
+        # Extract and plot wave 1 amplitude over frequencies, one line per time-point, one graph per frequency
+        for tix, tp in enumerate(timepoints):
+            for idx, db in enumerate(distinct_dbs):
+                yData = metrics_table[(metrics_table['dB Level'] == db) & (metrics_table['Timepoint'] == tp) & (
+                            metrics_table['Frequency (Hz)'] == freq)]
+                w1Mean[tix, idx] = np.nanmean(yData['Wave I amplitude (P1-T1) (μV)'])
+                w1Err[tix, idx] = np.nanstd(yData['Wave I amplitude (P1-T1) (μV)'])
+            fig2.add_trace(go.Scatter(x=np.arange(len(distinct_dbs)), y=w1Mean[tix, :], mode='lines',
+                                      showlegend=False, marker=dict(color=timeColours[tix])),
+                           row=int(np.ceil((ii + 1) / 2)), col=colIdx)
+            fig2.add_trace(go.Scatter(x=np.arange(len(distinct_dbs)), y=w1Mean[tix, :], mode='markers',
+                                      name=f'{tp}', marker=dict(color=timeColours[tix]),
+                                      error_y=dict(type='data', array=w1Err[tix, :], visible=True),
+                                      showlegend=legendOn),
+                           row=int(np.ceil((ii + 1) / 2)), col=colIdx)
+        fig2.update_layout(width=1200, height=700)
+        fig2.update_xaxes(dict(tickmode='array', tickvals=np.arange(len(distinct_dbs)), ticktext=distinct_dbs),
+                          title='dB Level')
+        fig2.update_layout(title=f'Pure tone wave 1 amplitudes over time')
+        fig2.update_yaxes(range=[0, np.max(metrics_table['Wave I amplitude (P1-T1) (μV)'])],
+                          title='Wave 1 Amplitude (uV)')
+        fig2.update_layout(font_family="Helvetica",
+                           font_color="black",
+                           title_font_family="Helvetica",
+                           font=dict(size=17))
+
+    fig.write_image(os.path.join(saveRoot, 'pure_tone_thresholds_over_time.pdf'))
+    fig.write_image(os.path.join(saveRoot, 'pure_tone_thresholds_over_time.jpg'))
+    fig2.write_image(os.path.join(saveRoot, 'pure_tone_wave1_amplitude_over_time.pdf'))
+    fig2.write_image(os.path.join(saveRoot, 'pure_tone_wave1_amplitude_over_time.jpg'))
 
 
 
