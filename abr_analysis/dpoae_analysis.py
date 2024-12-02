@@ -286,10 +286,11 @@ def get_str(data):
 
 # Open UI for user to select files to be analysed
 files = fd.askopenfilenames(title="Select .arf files | Sélectionnez les fichiers .arf")
-saveRoot = '/home/nc/Documents/Analysis/Pilot_control/DPOAEs'#= fd.askdirectory(title='Select save directory | Sélectionnez le répertoire de sauvegarde')
+# Ask user to select save directory
+saveRoot = fd.askdirectory(title='Select save directory | Sélectionnez le répertoire de sauvegarde')
 counter = 1
 metrics_data_all = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], 'Mouse Name': [], 'Timepoint': [],
-                        'Frequency (Hz)': [], 'dB Level': [], 'DP Threshold': []}
+                        'Frequency (Hz)': [], 'dB Level': [], 'DP Threshold': []} # make empty dataframe
 for file in files:
     annotations = []
     dfs = []
@@ -359,9 +360,41 @@ for file in files:
         metrics_data = pd.DataFrame(metrics_data)
         metrics_data = metrics_data.sort_values(by=['Mouse Name', 'Date'])
         metrics_data.to_csv(os.path.join(saveDir, 'dataTable.csv'))
-        counter = counter + 1
+    counter = counter + 1
 
 # Save the across-sessions metrics table
 metrics_data_all = pd.DataFrame(metrics_data_all)
 metrics_data_all = metrics_data_all.sort_values(by=['Mouse Name', 'Date'])
 metrics_data_all.to_csv(os.path.join(saveRoot, 'DPOAEs_dataTable.csv'))
+
+# Plot DPOAE thresholds across all sessions
+timepoints = metrics_data_all['Timepoint'].unique()
+timeColours = cc.glasbey_dark[:len(timepoints)]
+meanThresh = np.empty((len(timepoints), len(distinct_freqs)))
+errThresh = np.empty((len(timepoints), len(distinct_freqs)))
+fig = go.Figure()
+# Extract and plot DP thresholds over frequencies, over time - one line per time-point
+for tix, tp in enumerate(timepoints):
+    for ii,freq in enumerate(distinct_freqs):
+        yData = metrics_data_all[(metrics_data_all['Timepoint']==tp) & (metrics_data_all['Frequency (Hz)'] == freq) & (metrics_data_all['dB Level'] == 20)]
+        meanThresh[tix,ii] = np.nanmean(yData['DP Threshold']) # find mean threshold across all mice
+        errThresh[tix,ii] = np.nanstd(yData['DP Threshold']) / np.sqrt(len(yData['DP Threshold'])) # SEM
+    fig.add_trace(go.Scatter(x=np.arange(len(distinct_freqs)), y=meanThresh[tix,:], mode='lines',
+                                 showlegend=False, marker=dict(color=timeColours[tix])))
+    fig.add_trace(go.Scatter(x=np.arange(len(distinct_freqs)), y=meanThresh[tix,:], mode='markers',
+                                 error_y=dict(type='data', array=errThresh[tix, :], visible=True),
+                                 name=tp, marker=dict(color=timeColours[tix]),showlegend=True))
+    # Update layout
+    fig.update_layout(width=1200, height=700)
+    fig.update_xaxes(dict(tickmode='array', tickvals=np.arange(len(distinct_freqs)), ticktext=distinct_freqs),title='Frequency (Hz)')
+    fig.update_layout(title='DPOAE thresholds over time')
+    fig.update_yaxes(range=[0,np.max(distinct_dbs)],title='Distortion product threshold (dB)')
+    fig.update_layout(font_family="Helvetica",
+                      font_color="black",
+                      title_font_family="Helvetica",
+                      font=dict(size=17))
+# save the plot
+fig.write_image(os.path.join(saveRoot, 'DPOAE_thresholds_over_time.pdf'))
+fig.write_image(os.path.join(saveRoot, 'DPOAE_thresholds_over_time.jpg'))
+
+
