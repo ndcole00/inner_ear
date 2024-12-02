@@ -4,8 +4,8 @@ import fdasrsf as fs
 import pandas as pd
 import numpy as np
 from scipy.signal import find_peaks
+from scipy import stats
 import os
-from scipy.interpolate import CubicSpline
 import plotly.graph_objects as go
 import struct
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -147,34 +147,6 @@ def arfread(PATH, **kwargs):
 
     return data
 
-# For plotting ABR curves
-def interpolate_and_smooth(final, target_length=244):
-    if len(final) > target_length:
-        new_points = np.linspace(0, len(final), target_length + 2)
-        interpolated_values = np.interp(new_points, np.arange(len(final)), final)
-        final = np.array(interpolated_values[:target_length], dtype=float)
-    elif len(final) < target_length:
-        original_indices = np.arange(len(final))
-        target_indices = np.linspace(0, len(final) - 1, target_length)
-        cs = CubicSpline(original_indices, final)
-        final = cs(target_indices)
-    return final
-
-
-def plot_wave(fig, x_values, y_values, color, name, marker_color=None):
-    fig.add_trace(go.Scatter(x=x_values, y=y_values, mode='lines', name=name, line=dict(color=color)))
-    if marker_color:
-        fig.add_trace(go.Scatter(x=x_values, y=y_values, mode='markers', marker=dict(color=marker_color), name=name,
-                                 showlegend=False))
-
-
-def find_dp_threshold(df,freq):
-
-    for idx, db in enumerate(df['Level(dB)'].unique()):
-        # Extract df for this frequency
-        df_filtered = df[df['Freq(Hz)']==freq & df['Level(dB)']==db]
-        dp_freq = 2 * df['F1'] - df['F2']  # find frequency of distortion product
-
 
 def plot_waves_stacked(df,freq):
     fig = go.Figure()
@@ -187,6 +159,7 @@ def plot_waves_stacked(df,freq):
 
     db_levels = sorted(unique_dbs, reverse=True)
     max_db = db_levels[0]
+    db_thresh = max_db
 
     for i, db in enumerate(db_levels):
         try:
@@ -204,11 +177,21 @@ def plot_waves_stacked(df,freq):
                 if db == max_db:  # first plot only
                     # Find peaks in highest dB trace
                     # Normalize the waveform
-                    peaks,_ = find_peaks(final_normalized,height=final_normalized[0]+.1)
+                    peaks,_ = find_peaks(final_normalized,height=final_normalized[0]+.2)
                     if len(peaks) < 2: # in case of very noisy start
-                        peaks,_ = find_peaks(final_normalized,height=inal_normalized[0]+.01)
+                        peaks,_ = find_peaks(final_normalized,height=final_normalized[0]+.1)
                     peaks = peaks[peaks<(len(final_normalized)/2)-10] # = [] # remove any peaks over max frequency
                     peaks = peaks[peaks>10]
+                    if len(peaks) > 3: # in case too many peaks still
+                        temp_hz = np.asarray(hz)
+                        freq_idx = (np.abs(temp_hz - (freq*1.1))).argmin()
+                        peaks = peaks[peaks < freq_idx] # remove any values above F2 (freq * 1.09)
+                        if len(peaks) > 3: # in case this didn't work
+                            freq_idx = (np.abs(temp_hz - (freq * .909))).argmin() # manually find where F1 should be
+                            F1 = np.abs(peaks-freq_idx).argmin() # find the peak that corresponds
+                            freq_idx = (np.abs(temp_hz - (freq * 1.09))).argmin()  # manually find where F2 should be
+                            F2 = np.abs(peaks - freq_idx).argmin() # find the peak that corresponds
+                            peaks = peaks[[F1,F2]]
                     F1 = peaks[-2]
                     F2 = peaks[-1]
                     if len(peaks) == 3: # peak finding should hopefully find the DP peak as well as F1 and F2
@@ -216,22 +199,22 @@ def plot_waves_stacked(df,freq):
                     else: # but if it doesn't, calculate
                         DP = 2*F1-F2
                     prev_thresh = False
-                    db_thresh = max_db
                     for idx, db_idx in enumerate(
                             unique_dbs):  # now cycle through traces from lowest dB to find threshold
                         ff = df[(df['Freq(Hz)'] == freq) & (df['Level(dB)'] == db_idx)]
-                        index = ff.index.values[-1]
-                        trace = df.loc[index, '0':].dropna()
-                        trace = pd.to_numeric(final, errors='coerce')
-                        #trace = trace/max_value
+                        ix = ff.index.values[-1]
+                        trace = df.loc[ix, '0':].dropna()
+                        trace = pd.to_numeric(trace, errors='coerce')
                         trace = trace.to_numpy()
-                        st_dev = np.std(trace[np.concatenate([np.arange(DP - 13, DP - 3), np.arange(DP + 3,
-                                                                                                   DP + 13)])])  # find std of trace either side of expected peak
-                        mean_vals = np.max(np.abs(trace[np.concatenate([np.arange(DP - 13, DP - 3), np.arange(DP + 3,
-                                                                                                       DP + 13)])]))  # find mean of trace either side of expected peak
+                        st_dev = np.std(trace[np.concatenate([np.arange(DP - 8, DP - 3), np.arange(DP + 3,
+                                                                                                   DP + 8)])])  # find std of trace either side of expected peak
+                        #st_dev = np.std(trace)
+                        #mean_vals = np.mean(np.abs(trace))
+                        mean_vals = np.mean(trace[np.concatenate([np.arange(DP - 8, DP - 3), np.arange(DP + 3,
+                                                                                                       DP + 8)])])  # find mean of trace either side of expected peak
                         #max_val = np.max(trace[[DP-2,DP-1,DP,DP+1,DP+2]])  # find max value at expected frequency range
-                        if trace[DP] > mean_vals + st_dev * 2:  # if peak is greater than 2 * sd
-                            if prev_thresh: # check that one dB above also has acceptable peak
+                        if trace[DP] > (mean_vals + st_dev * 2):  # if peak is greater than mean + [2 * sd]
+                            if prev_thresh and idx>0: # check that one dB above also has acceptable peak
                                 db_thresh = unique_dbs[idx - 1]
                                 break
                             prev_thresh = True
@@ -263,11 +246,8 @@ def plot_waves_stacked(df,freq):
                 if db == max_db: # top plot only
                     fig.add_trace(go.Scatter(x=[hz[DP], hz[F1], hz[F2]], y=[y_values[DP]+.1,y_values[F1] + .1, y_values[F2] + .1],
                                              mode='markers', marker=dict(symbol='triangle-down', color='black'),showlegend=False))
-                    #fig.add_annotation(dict(font=dict(color='black',size=10),
-                     #                      x=hz[DP], y=[y_values[DP] + .1],
-                      #                     showarrow=True,
-                       #                    text='Distortion product'),
-                        #                   showlegend=False)
+                   # fig.add_trace(go.Scatter(x=[hz[DP]], y=[y_values[DP] + 0.5],mode='lines+text',text='dp',
+                                     #        showlegend=False,orientation='v'))
 
 
                 fig.add_annotation(
@@ -285,15 +265,15 @@ def plot_waves_stacked(df,freq):
         fig.update_layout(title=dict(text=f'{df.name.split("/")[-1]} - Frequency: {freq} Hz', font = dict(family='Helvetica', size=15)),
                   xaxis_title='Frequency(Hz)',
                   yaxis_title='Voltage (μV)',
-                  width=400,
+                  width=500,
                   height=700,
                   yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
                   xaxis=dict(showgrid=False, zeroline=False))
 
-        khz = df['Freq(Hz)'] == freq
-    fig.show()
-        #fig.write_image(os.path.join(saveDir,f'stacked_waves_{freq}Hz_{df.name}.pdf'))
-        #fig.write_image(os.path.join(saveDir, f'stacked_waves_{freq}Hz_{df.name}.jpg'))
+    fig.write_image(os.path.join(saveDir,f'stacked_waves_{freq}Hz_{df.name}.pdf'))
+    fig.write_image(os.path.join(saveDir, f'stacked_waves_{freq}Hz_{df.name}.jpg'))
+
+    return db_thresh
 
 
 def get_str(data):
@@ -304,48 +284,12 @@ def get_str(data):
     return data.decode('utf-8')
 
 
-def peak_finding(wave):
-    # Prepare waveform
-    waveform = interpolate_and_smooth(wave)
-    waveform_torch = torch.tensor(waveform, dtype=torch.float32).unsqueeze(0)
-
-    # Get prediction from model
-    outputs = peak_finding_model(waveform_torch)
-    prediction = int(round(outputs.detach().numpy()[0][0], 0))
-
-    # Apply Gaussian smoothing
-    smoothed_waveform = gaussian_filter1d(wave, sigma=1)
-
-    # Find peaks and troughs
-    n = 18
-    t = 14
-    start_point = prediction - 9
-    smoothed_peaks, _ = find_peaks(smoothed_waveform[start_point:], distance=n)
-    smoothed_troughs, _ = find_peaks(-smoothed_waveform, distance=t)
-    sorted_indices = np.argsort(smoothed_waveform[smoothed_peaks + start_point])
-    highest_smoothed_peaks = np.sort(smoothed_peaks[sorted_indices[-5:]] + start_point)
-    relevant_troughs = np.array([])
-    for p in range(len(highest_smoothed_peaks)):
-        c = 0
-        for t in smoothed_troughs:
-            if t > highest_smoothed_peaks[p]:
-                if p != 4:
-                    try:
-                        if t < highest_smoothed_peaks[p + 1]:
-                            relevant_troughs = np.append(relevant_troughs, int(t))
-                            break
-                    except IndexError:
-                        pass
-                else:
-                    relevant_troughs = np.append(relevant_troughs, int(t))
-                    break
-    relevant_troughs = relevant_troughs.astype('i')
-    return highest_smoothed_peaks, relevant_troughs
-
 # Open UI for user to select files to be analysed
 files = fd.askopenfilenames(title="Select .arf files | Sélectionnez les fichiers .arf")
 saveRoot = '/home/nc/Documents/Analysis/Pilot_control/DPOAEs'#= fd.askdirectory(title='Select save directory | Sélectionnez le répertoire de sauvegarde')
 counter = 1
+metrics_data_all = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], 'Mouse Name': [], 'Timepoint': [],
+                        'Frequency (Hz)': [], 'dB Level': [], 'DP Threshold': []}
 for file in files:
     annotations = []
     dfs = []
@@ -372,6 +316,8 @@ for file in files:
                 row = {'Freq(Hz)': freq, 'Level(dB)': db, 'F1_freq':F1,'F2_freq':F2, **wave_data}
                 rows.append(row)
 
+        metrics_data = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], 'Mouse Name': [], 'Timepoint': [],
+                        'Frequency (Hz)': [], 'dB Level': [], 'DP Threshold': []}
         # Make dataframe with all data from session
         df = pd.DataFrame(rows)
         df.name = file.split('/')[-1][0:-4]
@@ -385,43 +331,37 @@ for file in files:
 
 
         # Get distinct frequency and dB level values used in session
+        if not any(df.columns=='Freq(Hz)'): # in case session does not have required data
+            print('Wrong recording type, skipping...')
+            continue
         distinct_freqs = sorted(pd.concat([df['Freq(Hz)']]).unique())
+        distinct_freqs = [freq for freq in distinct_freqs if freq<=30000] # correct for strange bug where one trial of 32kHz is recorded
         distinct_dbs = sorted(pd.concat([df['Level(dB)']]).unique())
 
         # Cycle through frequencies
         for freq in distinct_freqs:
-            plot_waves_stacked(df,freq)
+            db_thresh = plot_waves_stacked(df,freq)
+            for db in distinct_dbs:
+                # Update datatable for this session
+                metrics_data['File Name'].append(df.name)
+                metrics_data['Date'].append(df.name.split('_')[0])
+                metrics_data['Session Type'].append(df.name.split('_')[1])
+                metrics_data['Ear'].append(df.name.split('_')[2])
+                metrics_data['Mouse Name'].append(df.name.split('_')[3])
+                metrics_data['Timepoint'].append(df.name.split('_')[4])
+                metrics_data['Frequency (Hz)'].append(freq)
+                metrics_data['dB Level'].append(db)
+                metrics_data['DP Threshold'].append(db_thresh)
 
-        # Extract important metrics
-        metrics_data = make_metrics_table(df, distinct_freqs, distinct_dbs)
-        # Append to metrics table for all click/PT sessions
-        for key,val in dict.items(metrics_data):
-            a = 1
-            if click:
-                click_metrics_data[key] = click_metrics_data[key] + val
-            else:
-                pt_metrics_data[key] = pt_metrics_data[key] + val
+        # Append to across sessions metrics data
+        for key, val in dict.items(metrics_data):
+            metrics_data_all[key] = metrics_data_all[key] + val
         metrics_data = pd.DataFrame(metrics_data)
-        metrics_data.to_csv(os.path.join(saveDir,'dataTable.csv'))
-    counter = counter + 1
+        metrics_data = metrics_data.sort_values(by=['Mouse Name', 'Date'])
+        metrics_data.to_csv(os.path.join(saveDir, 'dataTable.csv'))
+        counter = counter + 1
 
-# save all the click and PT datatables together
-if len(click_metrics_data['File Name']) > 0:
-    metrics_data = pd.DataFrame(click_metrics_data)
-    metrics_data.sort_values(by=['Mouse Name','Date'])
-    metrics_data.to_csv(os.path.join(saveRoot, 'click_dataTable.csv'))
-    # Plot click thresholds over days
-
-if len(pt_metrics_data['File Name']) > 0:
-    metrics_data = pd.DataFrame(pt_metrics_data)
-    metrics_data.sort_values(by=['Mouse Name','Date'])
-    metrics_data.to_csv(os.path.join(saveRoot, 'pt_dataTable.csv'))
-    # Plot pure tone thresholds over days
-
-
-
-
-
-
-
-
+# Save the across-sessions metrics table
+metrics_data_all = pd.DataFrame(metrics_data_all)
+metrics_data_all = metrics_data_all.sort_values(by=['Mouse Name', 'Date'])
+metrics_data_all.to_csv(os.path.join(saveRoot, 'DPOAEs_dataTable.csv'))
