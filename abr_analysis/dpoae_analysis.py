@@ -13,17 +13,14 @@ from scipy.ndimage import gaussian_filter1d
 import colorcet as cc
 from tkinter import filedialog as fd
 
-
-# N.Cole ULiege 2024 - mostly adapted from Erra et al., 2024 (https://www.biorxiv.org/content/10.1101/2024.06.20.599815v1)
-# For analysing ABR sessions, uses CNNs for finding hearing thresholds and wave 1 from click or pure tone sessions
-# Plots single waves and collected waves at each frequency for all dBs, including stacked and 3D plots
-# Extracts estimated thresholds and wave data and saves .csv file for each session, as well as concatenated data across all click and PT sessions
-# Plots basic metrics for changes over time within these groups
+# N.Cole ULiege 2024
+# For analysing DPOAE .arf files, uses peak finding to identify F1, F2, and distortion-product (DP) peaks, then looks
+# for lowest dB at which DP peak can be reliably separated from surrounding noise (mean + 2*sd). Plots traces at each
+# frequency, then returns datatables for each session and across sessions
 
 # DEPENDENCIES:
 # Before running, run Init file in console to install necessary modules.
-# 'Models' folder containing 'abr_cnn_aug_norm_opt.keras' and 'waveI_cnn_model.pth' must be in same folder as this script
-# Code relies on all files having naming structure 'date_clickOrPT_ear_mouseName_timepoint', in this order, to do between-session analysis
+# Code relies on all files having naming structure 'date_DPOAE_ear_mouseName_timepoint', in this order, to do between-session analysis
 
 
 # For reading .arf files
