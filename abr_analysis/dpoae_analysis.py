@@ -203,12 +203,10 @@ def plot_waves_stacked(df,freq):
                         trace = df.loc[ix, '0':].dropna()
                         trace = pd.to_numeric(trace, errors='coerce')
                         trace = trace.to_numpy()
-                        st_dev = np.std(trace[np.concatenate([np.arange(DP - 8, DP - 3), np.arange(DP + 3,
-                                                                                                   DP + 8)])])  # find std of trace either side of expected peak
-                        #st_dev = np.std(trace)
-                        #mean_vals = np.mean(np.abs(trace))
-                        mean_vals = np.mean(trace[np.concatenate([np.arange(DP - 8, DP - 3), np.arange(DP + 3,
-                                                                                                       DP + 8)])])  # find mean of trace either side of expected peak
+                        st_dev = np.std(trace[np.concatenate([np.arange(DP - 13, DP - 3), np.arange(DP + 3,
+                                                                                                   DP + 13)])])  # find std of trace either side of expected peak
+                        mean_vals = np.mean(trace[np.concatenate([np.arange(DP - 13, DP - 3), np.arange(DP + 3,
+                                                                                                       DP + 13)])])  # find mean of trace either side of expected peak
                         #max_val = np.max(trace[[DP-2,DP-1,DP,DP+1,DP+2]])  # find max value at expected frequency range
                         if trace[DP] > (mean_vals + st_dev * 2):  # if peak is greater than mean + [2 * sd]
                             if prev_thresh and idx>0: # check that one dB above also has acceptable peak
@@ -331,6 +329,7 @@ for file in files:
         # Get distinct frequency and dB level values used in session
         if not any(df.columns=='Freq(Hz)'): # in case session does not have required data
             print('Wrong recording type, skipping...')
+            counter = counter + 1
             continue
         distinct_freqs = sorted(pd.concat([df['Freq(Hz)']]).unique())
         distinct_freqs = [freq for freq in distinct_freqs if freq<=30000] # correct for strange bug where one trial of 32kHz is recorded
@@ -385,7 +384,7 @@ for tix, tp in enumerate(timepoints):
     fig.update_layout(width=1200, height=700)
     fig.update_xaxes(dict(tickmode='array', tickvals=np.arange(len(distinct_freqs)), ticktext=distinct_freqs),title='Frequency (Hz)')
     fig.update_layout(title='DPOAE thresholds over time')
-    fig.update_yaxes(range=[0,np.max(distinct_dbs)],title='Distortion product threshold (dB)')
+    fig.update_yaxes(range=[0,np.max(distinct_dbs)],title='Distortion-product threshold (dB)')
     fig.update_layout(font_family="Helvetica",
                       font_color="black",
                       title_font_family="Helvetica",
