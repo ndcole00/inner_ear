@@ -280,7 +280,7 @@ def get_str(data):
 
 
 # Open UI for user to select files to be analysed
-files = fd.askopenfilenames(title="Select .arf files | Sélectionnez les fichiers .arf")
+files = fd.askopenfilenames(title="Select .arf files | Sélectionnez les fichiers .arf",filetypes = (("DPOAE sessions","*DPOAE*"),("All files","*")))
 # Ask user to select save directory
 saveRoot = fd.askdirectory(title='Select save directory | Sélectionnez le répertoire de sauvegarde')
 counter = 1

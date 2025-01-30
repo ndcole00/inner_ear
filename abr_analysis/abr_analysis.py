@@ -303,48 +303,51 @@ def plot_waves_single_tuple(freq, db, y_min, y_max):
 
 
 def plot_3d_surface(df, freq, y_min, y_max):
-    fig = go.Figure()
-    db_levels = sorted(df['Level(dB)'].unique(), reverse=True)
-    original_waves = []
     try:
-        threshold = calculate_hearing_threshold(df, freq)
+        fig = go.Figure()
+        db_levels = sorted(df['Level(dB)'].unique(), reverse=True)
+        original_waves = []
+        try:
+            threshold = calculate_hearing_threshold(df, freq)
+        except:
+            threshold = None
+        glasbey_colors = cc.glasbey[:len(db_levels)]
+        for db in db_levels:
+            x_values, y_values, _, _ = calculate_and_plot_wave(df, freq, db, 'blue')
+            if y_values is not None:
+                original_waves.append(y_values.tolist())
+
+        original_waves_array = np.array([wave[:-1] for wave in original_waves])
+        try:
+            time = np.linspace(0, 10, original_waves_array.shape[1])
+            obj = fs.fdawarp(original_waves_array.T, time)
+            obj.srsf_align(parallel=True)
+            warped_waves_array = obj.fn.T
+        except IndexError:
+            warped_waves_array = np.array([])
+
+        for i, (db, warped_waves) in enumerate(zip(db_levels, warped_waves_array)):
+            fig.add_trace(
+                go.Scatter3d(x=[db] * len(warped_waves), y=x_values, z=warped_waves, mode='lines', name=f'{int(db)} dB',
+                                 line=dict(color=glasbey_colors[i])))
+            if db == threshold:
+                fig.add_trace(go.Scatter3d(x=[db] * len(warped_waves), y=x_values, z=warped_waves, mode='lines',
+                                           name=f'Thresh: {int(db)} dB', line=dict(color='black', width=5)))
+
+        for i in range(len(time)):
+            z_values_at_time = [warped_waves_array[j, i] for j in range(len(db_levels))]
+            fig.add_trace(go.Scatter3d(x=db_levels, y=[time[i]] * len(db_levels), z=z_values_at_time, mode='lines',
+                                       name=f'Time: {time[i]:.2f} ms', line=dict(color='rgba(0, 255, 0, 0.3)'),
+                                       showlegend=False))
+
+        fig.update_layout(width=700, height=450)
+        fig.update_layout(title= dict(text=f'{df.name} - Frequency: {freq} Hz',font=dict(family='Helvetica', size=20)),
+                          scene=dict(xaxis_title='dB', yaxis_title='Time (ms)', zaxis_title='Voltage (μV)'),
+                          annotations=annotations)
+
+        fig.write_html(os.path.join(saveDir, f'3d_waves_{freq}Hz_{df.name}.html'))
     except:
-        threshold = None
-    glasbey_colors = cc.glasbey[:len(db_levels)]
-    for db in db_levels:
-        x_values, y_values, _, _ = calculate_and_plot_wave(df, freq, db, 'blue')
-        if y_values is not None:
-            original_waves.append(y_values.tolist())
-
-    original_waves_array = np.array([wave[:-1] for wave in original_waves])
-    try:
-        time = np.linspace(0, 10, original_waves_array.shape[1])
-        obj = fs.fdawarp(original_waves_array.T, time)
-        obj.srsf_align(parallel=True)
-        warped_waves_array = obj.fn.T
-    except IndexError:
-        warped_waves_array = np.array([])
-
-    for i, (db, warped_waves) in enumerate(zip(db_levels, warped_waves_array)):
-        fig.add_trace(
-            go.Scatter3d(x=[db] * len(warped_waves), y=x_values, z=warped_waves, mode='lines', name=f'{int(db)} dB',
-                             line=dict(color=glasbey_colors[i])))
-        if db == threshold:
-            fig.add_trace(go.Scatter3d(x=[db] * len(warped_waves), y=x_values, z=warped_waves, mode='lines',
-                                       name=f'Thresh: {int(db)} dB', line=dict(color='black', width=5)))
-
-    for i in range(len(time)):
-        z_values_at_time = [warped_waves_array[j, i] for j in range(len(db_levels))]
-        fig.add_trace(go.Scatter3d(x=db_levels, y=[time[i]] * len(db_levels), z=z_values_at_time, mode='lines',
-                                   name=f'Time: {time[i]:.2f} ms', line=dict(color='rgba(0, 255, 0, 0.3)'),
-                                   showlegend=False))
-
-    fig.update_layout(width=700, height=450)
-    fig.update_layout(title= dict(text=f'{df.name} - Frequency: {freq} Hz',font=dict(family='Helvetica', size=20)),
-                      scene=dict(xaxis_title='dB', yaxis_title='Time (ms)', zaxis_title='Voltage (μV)'),
-                      annotations=annotations)
-
-    fig.write_html(os.path.join(saveDir, f'3d_waves_{freq}Hz_{df.name}.html'))
+        print('Error plotting 3D waves')
 
 # Put all important metrics data from this session into table
 def make_metrics_table(df, freqs, db_levels):
@@ -576,7 +579,7 @@ model_loader = torch.load('./models/waveI_cnn_model.pth')
 peak_finding_model.load_state_dict(model_loader)
 peak_finding_model.eval()
 # Open UI for user to select files to be analysed
-files = fd.askopenfilenames(title="Select .arf files | Sélectionnez les fichiers .arf")
+files = fd.askopenfilenames(title="Select .arf files | Sélectionnez les fichiers .arf",filetypes = (("ABR sessions","*PT* *CLICK*"),("Pure-tone sessions only","*PT*"),("Click sessions only","*CLICK*"),("All files","*")))
 saveRoot = fd.askdirectory(title='Select save directory | Sélectionnez le répertoire de sauvegarde')
 # create empty dictionaries for storing data across sessions
 click_metrics_data = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], 'Mouse Name': [], 'Timepoint': [],
@@ -774,7 +777,10 @@ if len(pt_metrics_data['File Name']) > 0:
                     (metrics_data['Mouse Name'] == mouse) & (metrics_data['dB Level'] == np.max(distinct_dbs)) &
                     (metrics_data['Timepoint'] == tp) & (metrics_data['Frequency (Hz)'] == freq)]
                 if not yData['Estimated Threshold'].empty:
-                    thresh[tix, idx] = yData['Estimated Threshold']
+                    try:
+                        thresh[tix, idx] = yData['Estimated Threshold']
+                    except:
+                        a = 1
             # Add a thresholds line over days for each mouse
             fig.add_trace(go.Scatter(x=np.arange(len(mouseNames)), y=thresh[:, idx], mode='lines',
                                      showlegend=False, marker=dict(color=mouseColours[idx])),
