@@ -515,10 +515,11 @@ def calculate_hearing_threshold(df, freq, baseline_level=100):
     lowest_db = db_levels[0]
     previous_prediction = None
 
-    # Don't accept threshold dB if any higher dBs have not been fit
-    for idx,p in enumerate(y_pred):
-        if p == 0:
-            y_pred[idx:-1] = 0
+    # Don't accept threshold dB if any higher dBs have not been fit (allow for one error)
+   # for idx,p in enumerate(y_pred):
+    #    if idx < len(y_pred)-1:
+     #       if p == 0 and y_pred(idx+1) == 0:
+      #          y_pred[idx:-1] = 0
 
     for p, d in zip(y_pred, db_levels):
         if p == 0:
