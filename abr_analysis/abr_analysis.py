@@ -515,11 +515,18 @@ def calculate_hearing_threshold(df, freq, baseline_level=100):
     lowest_db = db_levels[0]
     previous_prediction = None
 
-    # Don't accept threshold dB if any higher dBs have not been fit (allow for one error)
-   # for idx,p in enumerate(y_pred):
-    #    if idx < len(y_pred)-1:
-     #       if p == 0 and y_pred(idx+1) == 0:
-      #          y_pred[idx:-1] = 0
+    # failsafe for very noisy recordings
+    if any(y_pred[-3:]): # if it finds a threshold under 10dB
+
+        y_pred = (prediction > 0.75).astype(int).flatten() # first try raising the threshold
+
+        if any(y_pred[-3:]): # if still finding subthreshold waves
+            y_pred = (prediction > 0.85).astype(int).flatten() # raise the threshold again
+        # Don't accept threshold dB if any higher dBs have not been fit (allow for one error)
+        for idx,p in enumerate(y_pred):
+            if idx < len(y_pred)-1:
+                if p == 0 and y_pred[idx+1] == 0:
+                    y_pred[idx:-1] = 0
 
     for p, d in zip(y_pred, db_levels):
         if p == 0:
@@ -708,7 +715,7 @@ if len(click_metrics_data['File Name']) > 0:
         fig.update_layout(xaxis=dict(tickmode='array', tickvals=np.arange(len(mouseNames)), ticktext=timepoints))
         fig.update_layout(xaxis_title='Time-point', yaxis_title='Hearing threshold (dB)',
                           title='Click session thresholds over time')
-        fig.update_layout(yaxis_range=[np.min(distinct_dbs), np.max(distinct_dbs)])
+        fig.update_layout(yaxis_range=[np.min(distinct_dbs), np.max(distinct_dbs)+5])
         fig.update_layout(font_family="Helvetica",
                           font_color="black",
                           title_font_family="Helvetica",
@@ -803,7 +810,7 @@ if len(pt_metrics_data['File Name']) > 0:
         fig.update_xaxes(dict(tickmode='array', tickvals=np.arange(len(mouseNames)), ticktext=timepoints),
                          title='Time-point')
         fig.update_layout(title='Pure tone thresholds over time')
-        fig.update_yaxes(range=[np.min(distinct_dbs), np.max(distinct_dbs)], title='Hearing threshold (dB)')
+        fig.update_yaxes(range=[np.min(distinct_dbs), np.max(distinct_dbs)+5], title='Hearing threshold (dB)')
         fig.update_layout(font_family="Helvetica",
                           font_color="black",
                           title_font_family="Helvetica",

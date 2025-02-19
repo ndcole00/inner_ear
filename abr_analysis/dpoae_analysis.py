@@ -384,7 +384,7 @@ for tix, tp in enumerate(timepoints):
     fig.update_layout(width=1200, height=700)
     fig.update_xaxes(dict(tickmode='array', tickvals=np.arange(len(distinct_freqs)), ticktext=distinct_freqs),title='Frequency (Hz)')
     fig.update_layout(title='DPOAE thresholds over time')
-    fig.update_yaxes(range=[0,np.max(distinct_dbs)],title='Distortion-product threshold (dB)')
+    fig.update_yaxes(range=[0,np.max(distinct_dbs)+5],title='Distortion-product threshold (dB)')
     fig.update_layout(font_family="Helvetica",
                       font_color="black",
                       title_font_family="Helvetica",
