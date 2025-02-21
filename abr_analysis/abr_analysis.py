@@ -522,6 +522,16 @@ def calculate_hearing_threshold(df, freq, baseline_level=100):
 
         if any(y_pred[-3:]): # if still finding subthreshold waves
             y_pred = (prediction > 0.85).astype(int).flatten() # raise the threshold again
+
+            if any(y_pred[-3:]):  # if still finding subthreshold waves
+                y_pred = (prediction > 0.9).astype(int).flatten()  # raise the threshold again
+
+                if any(y_pred[-3:]):  # if still finding subthreshold waves
+                    y_pred = (prediction > 0.95).astype(int).flatten()  # raise the threshold again
+
+                    if any(y_pred[-3:]):  # if still finding subthreshold waves
+                        y_pred = (prediction > 0.99).astype(int).flatten()  # raise the threshold again
+
         # Don't accept threshold dB if any higher dBs have not been fit (allow for one error)
         for idx,p in enumerate(y_pred):
             if idx < len(y_pred)-1:
