@@ -1,7 +1,7 @@
 import warnings
 import io
 import plotly.io as pio
-from PIL import Image
+from PIL import Image, ImageTk
 warnings.filterwarnings('ignore')
 import fdasrsf as fs
 import pandas as pd
@@ -22,6 +22,8 @@ from tensorflow.keras.models import load_model
 import colorcet as cc
 import tkinter
 from tkinter import filedialog as fd
+import random
+import psutil
 
 
 # N.Cole ULiege 2024 - mostly adapted from Erra et al., 2024 (https://www.biorxiv.org/content/10.1101/2024.06.20.599815v1)
@@ -347,7 +349,7 @@ def plot_3d_surface(df, freq, y_min, y_max,threshold):
         print('Error plotting 3D waves')
 
 # Put all important metrics data from this session into table
-def make_metrics_table(df, freqs, db_levels):
+def make_metrics_table(df, freqs, db_levels,all_thresholds):
     # Create empty dictionary for storing data
     metrics_data = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], 'Mouse Name': [], 'Timepoint': [],
                     'Frequency (Hz)': [], 'dB Level': [], 'Wave I amplitude (P1-T1) (μV)': [],
@@ -418,7 +420,8 @@ def plot_waves_stacked(freq):
                              y=y_values,
                              mode='lines',
                              name=f'{int(db)} dB',
-                             line=dict(color=color_scale)))
+                             line=dict(color=color_scale),
+                                     showlegend=False))
 
             fig.add_annotation(
                     x=10,
@@ -430,7 +433,7 @@ def plot_waves_stacked(freq):
                     font=dict(size=10, color=color_scale),
                     xanchor="right"
                         )
-    fig.update_layout(title=dict(text=f'{df.name.split("/")[-1]} - Frequency: {freq} Hz', font = dict(family='Helvetica', size=15)),
+    fig.update_layout(title=dict(text=f'Select ABR threshold - random file {counter} of {len(files)}', font = dict(family='Helvetica', size=15)),
               xaxis_title='Time (ms)',
               yaxis_title='Voltage (μV)',
               width=400,
@@ -438,41 +441,45 @@ def plot_waves_stacked(freq):
               yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
               xaxis=dict(showgrid=False, zeroline=False))
 
+    # prepare figure as image
     buf = io.BytesIO()
     pio.write_image(fig, buf)
-    img = Image.open(buf)
-    img.show()
-    #fig.show()
+    img =  Image.open(buf)
 
-    # creating user-interactive buttons for selecting hearing threshold manually
+    # create GUI with buttons for selecting hearing threshold manually
     app = tkinter.Tk() # define this each time so that it opens a separate window
+    app.geometry("450x800+10+10")
+    image = ImageTk.PhotoImage(img)
+    imgbox = tkinter.Label(app,fg="black", compound="bottom")
+    imgbox.place(x=15,y=15)
+    imgbox.config(image=image) # place figure in app
+
     # Create a set for all clicked buttons (set prevents duplication)
     clicked = set()
-    def close_app():
+    def close_app(): # when accept button is pressed
         app.destroy()
-
 
     def create_buttons(db_levels, glasbey_colors):
         button = tkinter.Button(app,
                                     text='No threshold',
                                     command=lambda d=100: clicked.add(d),
                                     activebackground='white')
-        button.pack()
+        button.place(x=350,y=100)
         # Create a button for each db
         for i, db in enumerate(db_levels):
             button = tkinter.Button(app,
-                                    text=db,
+                                    text=f'{int(db)} dB',
                                     command=lambda d=db: clicked.add(d),
                                     fg=glasbey_colors[i],
                                     activebackground='white')
-            button.pack()
+            button.place(x=350,y=120+(i+1)*25)
         button = tkinter.Button(app,
                                 text='ACCEPT',
                                 command=close_app,
                                 activebackground='white')
-        button.pack()
+        button.place(x=350,y=125+(len(db_levels)+2)*25)
     create_buttons(db_levels,glasbey_colors)
-    # Now we enter to event loop -> the program is running
+    # Run the app
     app.mainloop()
 
     if len(clicked) == 0:
@@ -481,7 +488,11 @@ def plot_waves_stacked(freq):
         clicked = list(clicked)
         threshold = clicked[-1] # last value, in case user changed their mind
 
-    img.close()
+    print(f'Hearing threshold = {threshold}dB')
+    # because img.close doesn't seem to work, just hide any displayed windows
+    for proc in psutil.process_iter():
+        if proc.name() == "display":
+            proc.kill()
 
     for i, db in enumerate(db_levels):
         try:
@@ -603,6 +614,7 @@ pt_metrics_data = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], '
                    'Frequency (Hz)': [], 'dB Level': [], 'Wave I amplitude (P1-T1) (μV)': [],
                     'Latency to First Peak (ms)': [], 'Amplitude Ratio (Peak1/Peak4)': [], 'Estimated Threshold': []}
 counter = 1
+files = random.sample(files,len(files)) # randomly shuffle files so that user doesn't know which are being selected
 for file in files:
     if  "CLICK" in (file.split('/')[-1]).upper():
         click = True
@@ -611,7 +623,7 @@ for file in files:
     annotations = []
     dfs = []
     if file.endswith(".arf"):
-        print(f'Analysing {file.split('/')[-1]}, file {counter} of {len(files)}...')
+        print(f'Analysing file {counter} of {len(files)}...')
         # Read ARF file
         data = arfread(file)
         # Process ARF data
@@ -651,7 +663,7 @@ for file in files:
 
         # Sanity check that session hasn't been mis-labelled
         if click and len(distinct_freqs) > 1:
-            print(f'{file.split('/')[-1]} mis-labelled as CLICK, skipping...')
+            print(f' file {counter} mis-labelled as CLICK, skipping...')
             continue
 
         time_scale = 10.0 # 10ms recording by default
