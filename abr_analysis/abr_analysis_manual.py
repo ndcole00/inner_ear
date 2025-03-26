@@ -668,12 +668,24 @@ for file in files:
         time_scale = 10.0 # 10ms recording by default
         y_min = -5.0 # default scale is -5 to +5 uV
         y_max = 5.0
-        all_thresholds = []
+        all_thresholds_temp = []
         try:
-            for idx,freq in enumerate(distinct_freqs):
+            # if PT session, shuffle frequencies so user can't predict from the order
+            if click:
+                random_freqs = distinct_freqs
+            else:
+                random_freqs = random.sample(distinct_freqs,len(distinct_freqs))
+            for freq in random_freqs:
                 # Plot all waves at single frequency offset in y (to appear stacked)
-                threshold = plot_waves_stacked(freq) # use this to calculate threshold as well
-                all_thresholds.append(threshold)
+                threshold = plot_waves_stacked(freq)  # use this to calculate threshold as well
+                all_thresholds_temp.append(threshold)
+            all_thresholds = all_thresholds_temp
+            for idx in range(len(all_thresholds)):
+                thresh_idx = random_freqs[idx]==distinct_freqs
+                thresh_idx = [i for i, j in enumerate(thresh_idx, 1) if j] # convert this to integer
+                all_thresholds[idx] = all_thresholds_temp[thresh_idx[0]-1]
+            # Now use these thresholds to plot everything else
+            for freq in distinct_freqs:
                 # Plot all waves at a single frequency
                 plot_waves_single_frequency(df, freq, y_min, y_max,threshold)
                 # Plot all waves at single frequency as 3D surface (saves as html to open in browser)
