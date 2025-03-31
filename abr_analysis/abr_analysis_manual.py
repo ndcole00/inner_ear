@@ -477,7 +477,7 @@ def plot_waves_stacked(freq):
                                 text='ACCEPT',
                                 command=close_app,
                                 activebackground='white')
-        button.place(x=350,y=125+(len(db_levels)+2)*(len(distinct_dbs)+6))
+        button.place(x=350,y=125+(len(db_levels)+2)*25)
     create_buttons(db_levels,glasbey_colors)
     # Run the app
     app.mainloop()
