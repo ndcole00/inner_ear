@@ -5,6 +5,7 @@ library(gridExtra)
 
 
 dataFile <- '/home/nick/Documents/Analysis/R/Puncta_analysis/Pilot/Puncta_datatable.csv'
+saveDirectory <- '/home/nick/Documents/Analysis/R/Puncta_analysis/Pilot/'
 punctaData <- read_csv(dataFile, name_repair = "unique_quiet")
 
 ## P(PUNCTA) STATS
@@ -83,6 +84,9 @@ p <- ggplot(punctaData, aes(x = factor(Frequency),
   theme_minimal()
 plot_list[[2]] <- p
 image = grid.arrange(grobs = plot_list, ncol = 1)
+ggsave(file=sprintf("%sArea_boxplots.svg",saveDirectory),
+       plot=image,width=10,height=8)
+
 
 # ANOVA of areas
 pre_area_one.way <- punctaData %>%

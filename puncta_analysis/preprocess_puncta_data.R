@@ -92,6 +92,11 @@
     
     # Remove marked ROIs
     data <- data[!roisToRemove, ]
+    
+    # Quality control
+    circularity = 4 * pi * data$Area / data$Perim.^2
+    data <- data[circularity>0.9, ] # remove all cells with circularity below 0.9
+    
     tempData <- data.frame(Area <- numeric(),
                            Perim <- numeric(),
                            Condition <- list(),

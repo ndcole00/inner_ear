@@ -195,7 +195,8 @@ def plot_wave(fig, x_values, y_values, color, name, marker_color=None):
         fig.add_trace(go.Scatter(x=x_values, y=y_values, mode='markers', marker=dict(color=marker_color), name=name,
                                  showlegend=False))
 
-def calculate_and_plot_wave(df, freq, db, color, threshold=None):
+def calculate_and_plot_wave(df, freq, db, color, threshold,previous_peaks,previous_troughs):
+
 
     khz = df[(df['Freq(Hz)'] == freq) & (df['Level(dB)'] == db)]
     if not khz.empty:
@@ -211,13 +212,13 @@ def calculate_and_plot_wave(df, freq, db, color, threshold=None):
         x_values = np.linspace(0, len(y_values) / sampling_rate, len(y_values))
 
         y_values_for_peak_finding = interpolate_and_smooth(final[:244])
-        highest_peaks, relevant_troughs = peak_finding(y_values_for_peak_finding)
+        highest_peaks, relevant_troughs,previous_peaks,previous_troughs = peak_finding(y_values_for_peak_finding,db,threshold,previous_peaks,previous_troughs)
 
         return x_values, y_values, highest_peaks, relevant_troughs
     return None, None, None, None
 
 
-def plot_waves_single_frequency(df, freq, y_min, y_max):
+def plot_waves_single_frequency(df, freq, y_min, y_max,threshold):
 
     # Make new figure
     fig = go.Figure()
@@ -232,8 +233,9 @@ def plot_waves_single_frequency(df, freq, y_min, y_max):
         threshold = None
 
     for i, db in enumerate(sorted(db_levels)):
+
         x_values, y_values, highest_peaks, relevant_troughs = calculate_and_plot_wave(df, freq, db,
-                                                                                              glasbey_colors[i])
+                                                                                              glasbey_colors[i],threshold,[],[])
         if y_values is not None:
             fig.add_trace(go.Scatter(x=x_values, y=y_values, mode='lines', name=f'{int(db)} dB',
                                              line=dict(color=glasbey_colors[i])))
@@ -254,7 +256,7 @@ def plot_waves_single_frequency(df, freq, y_min, y_max):
                                          marker=dict(color='grey'), name='Troughs', showlegend=False))
     # Add thick black line for threshold (if it has been found)
     if threshold is not None:
-        x_values, y_values, _, _ = calculate_and_plot_wave(df, freq, threshold, 'black')
+        x_values, y_values, _, _ = calculate_and_plot_wave(df, freq, threshold, 'black',threshold,[],[])
         if y_values is not None:
             fig.add_trace(go.Scatter(x=x_values, y=y_values, mode='lines', name=f'Threshold: {int(threshold)} dB',
                                      line=dict(color='black', width=5)))
@@ -269,9 +271,11 @@ def plot_waves_single_frequency(df, freq, y_min, y_max):
     fig.write_image(os.path.join(saveDir, f'all_waves_{freq}_{df.name}.pdf'))
     fig.write_image(os.path.join(saveDir, f'all_waves_{freq}_{df.name}.jpg'))
 
-def plot_waves_single_tuple(freq, db, y_min, y_max):
+def plot_waves_single_tuple(freq, db, y_min, y_max, previous_peaks, previous_troughs):
     fig = go.Figure()
-    x_values, y_values, highest_peaks, relevant_troughs = calculate_and_plot_wave(df, freq, db, 'blue')
+    x_values, y_values, highest_peaks, relevant_troughs = calculate_and_plot_wave(df, freq, db, 'blue',[],previous_peaks,previous_troughs)
+    previous_peaks = highest_peaks
+    previous_troughs = relevant_troughs
 
     if y_values is not None:
         fig.add_trace(go.Scatter(x=x_values, y=y_values, mode='lines', name=df.name,
@@ -298,8 +302,7 @@ def plot_waves_single_tuple(freq, db, y_min, y_max):
 
     fig.write_image(os.path.join(saveDir, f'single_wave_{freq}Hz_{db}dB_{df.name}.pdf'))
     fig.write_image(os.path.join(saveDir, f'single_wave_{freq}Hz_{db}dB_{df.name}.jpg'))
-
-    return fig
+    return previous_peaks,previous_troughs
 
 
 def plot_3d_surface(df, freq, y_min, y_max):
@@ -313,7 +316,7 @@ def plot_3d_surface(df, freq, y_min, y_max):
             threshold = None
         glasbey_colors = cc.glasbey[:len(db_levels)]
         for db in db_levels:
-            x_values, y_values, _, _ = calculate_and_plot_wave(df, freq, db, 'blue')
+            x_values, y_values, _, _ = calculate_and_plot_wave(df, freq, db, 'blue',threshold,[],[])
             if y_values is not None:
                 original_waves.append(y_values.tolist())
 
@@ -361,12 +364,18 @@ def make_metrics_table(df, freqs, db_levels):
             threshold = calculate_hearing_threshold(df, freq)
         except:
             threshold = np.nan
+        db_levels = sorted(db_levels, reverse=True)
         for db in db_levels:
-            _, y_values, highest_peaks, relevant_troughs = calculate_and_plot_wave(df, freq, db, 'blue')
+            if db == 90:
+                previous_peaks = []
+                previous_troughs = []
 
+            _, y_values, highest_peaks, relevant_troughs = calculate_and_plot_wave(df, freq, db, 'blue',threshold,previous_peaks,previous_troughs)
+            previous_peaks = highest_peaks
+            previous_troughs = relevant_troughs
             if highest_peaks is not None:
                 if highest_peaks.size > 0:  # Check if highest_peaks is not empty
-                    first_peak_amplitude = y_values[highest_peaks[0]] - y_values[relevant_troughs[0]]
+                    first_peak_amplitude = np.abs(y_values[highest_peaks[0]] - y_values[relevant_troughs[0]])
                     latency_to_first_peak = highest_peaks[0] * (
                                 10 / len(y_values))  # Assuming 10 ms duration for waveform
 
@@ -464,7 +473,7 @@ def plot_waves_stacked(freq):
         khz = df['Freq(Hz)'] == freq
         fig.write_image(os.path.join(saveDir,f'stacked_waves_{freq}Hz_{df.name}.pdf'))
         fig.write_image(os.path.join(saveDir, f'stacked_waves_{freq}Hz_{df.name}.jpg'))
-
+    return threshold
 
 def get_str(data):
     # return string up until null character only
@@ -553,7 +562,7 @@ def calculate_hearing_threshold(df, freq, baseline_level=100):
     return lowest_db
 
 
-def peak_finding(wave):
+def peak_finding(wave,db,threshold,previous_peaks,previous_troughs):
     # Prepare waveform
     waveform = interpolate_and_smooth(wave)
     waveform_torch = torch.tensor(waveform, dtype=torch.float32).unsqueeze(0)
@@ -565,31 +574,184 @@ def peak_finding(wave):
     # Apply Gaussian smoothing
     smoothed_waveform = gaussian_filter1d(wave, sigma=1)
 
+    if previous_peaks is None:
+        previous_peaks = []
+        previous_troughs = []
+
     # Find peaks and troughs
-    n = 18
-    t = 14
-    start_point = prediction - 9
-    smoothed_peaks, _ = find_peaks(smoothed_waveform[start_point:], distance=n)
-    smoothed_troughs, _ = find_peaks(-smoothed_waveform, distance=t)
-    sorted_indices = np.argsort(smoothed_waveform[smoothed_peaks + start_point])
-    highest_smoothed_peaks = np.sort(smoothed_peaks[sorted_indices[-5:]] + start_point)
-    relevant_troughs = np.array([])
-    for p in range(len(highest_smoothed_peaks)):
-        c = 0
-        for t in smoothed_troughs:
-            if t > highest_smoothed_peaks[p]:
-                if p != 4:
-                    try:
-                        if t < highest_smoothed_peaks[p + 1]:
-                            relevant_troughs = np.append(relevant_troughs, int(t))
-                            break
-                    except IndexError:
-                        pass
+    n = 2
+    t = 2
+    old_method = 0
+    try:
+        smoothed_peaks, _ = find_peaks(smoothed_waveform, distance=n)
+        smoothed_troughs, _ = find_peaks(-smoothed_waveform, distance=t)
+        time = np.linspace(0, 10, len(smoothed_waveform))
+        smoothed_peaks = smoothed_peaks[smoothed_peaks > np.argmin(np.abs(time - 1))]  # cut off any peaks before 1ms
+        if len(previous_peaks)==0 and len(previous_troughs)==0:
+            if len(smoothed_peaks[np.logical_and(smoothed_peaks>np.argmin(np.abs(time - 1)),smoothed_peaks<np.argmin(np.abs(time - 6)))]) < 5:
+                smoothed_peaks, _ = find_peaks(waveform, distance=n)
+                smoothed_troughs, _ = find_peaks(-waveform, distance=t)
+            sorted_indices = np.argsort(smoothed_waveform[smoothed_troughs])
+            deepest_troughs = smoothed_troughs[sorted_indices[0:3]] # must be one of 4 deepest troughs
+            # find the trough that most closely corresponds to 2ms
+            relevant_troughs = [0,0,0,0,0,0]
+            highest_smoothed_peaks = [0,0,0,0,0,0]
+            potential_peaks = smoothed_troughs[np.logical_and(smoothed_troughs> np.argmin(np.abs(time - 1.5)),smoothed_troughs < np.argmin(np.abs(time - 2.5)))]
+            if  len(potential_peaks) >= 2: # if there are two troughs that could both be wave 1
+                sorted_indices = np.argsort(smoothed_waveform[potential_peaks]) # take the deepest one
+                relevant_troughs[0] = potential_peaks[sorted_indices[0]]
+            else:
+                relevant_troughs[0] = smoothed_troughs[np.argmin(np.abs(smoothed_troughs-np.argmin(np.abs(time-2))))] # find trough closest to 2s
+            # wave 1 peak will be the closest peak before
+            #idx = int(np.argwhere(smoothed_troughs==relevant_troughs[0]))
+            if np.all(smoothed_peaks>relevant_troughs[0]): # just in case trough is too early
+                unsmoothed_peaks, _ = find_peaks(waveform, distance=n)
+                if np.all(unsmoothed_peaks > relevant_troughs[0]):
+                    highest_smoothed_peaks[0] = relevant_troughs[0] - 5
                 else:
-                    relevant_troughs = np.append(relevant_troughs, int(t))
-                    break
-    relevant_troughs = relevant_troughs.astype('i')
-    return highest_smoothed_peaks, relevant_troughs
+                    highest_smoothed_peaks[0] = unsmoothed_peaks[np.argmin(np.abs(unsmoothed_peaks[unsmoothed_peaks < relevant_troughs[0]] - relevant_troughs[0]))]
+                #relevant_troughs[0] = smoothed_troughs[idx] # just find first trough after this
+                #idx = idx + 1
+            else:
+                highest_smoothed_peaks[0] = smoothed_peaks[np.argmin(np.abs(smoothed_peaks[smoothed_peaks<relevant_troughs[0]]-relevant_troughs[0]))]
+                # check that there isn't a higher peak immediately before
+            if any(np.logical_and(smoothed_peaks<highest_smoothed_peaks[0],smoothed_peaks>highest_smoothed_peaks[0]-3)):
+                next_peaks = smoothed_peaks[np.logical_and(smoothed_peaks<highest_smoothed_peaks[0],smoothed_peaks>highest_smoothed_peaks[0]-6)]
+                if np.max(smoothed_waveform[next_peaks]) > smoothed_waveform[highest_smoothed_peaks[0]]:
+                    highest_smoothed_peaks[0] = next_peaks[np.argmax(smoothed_waveform[next_peaks])]
+            wave_distance = int(np.diff([highest_smoothed_peaks[0],relevant_troughs[0]])) # this is the inter-wave distance
+            for w in range(1,5):
+                next_peaks = smoothed_peaks[smoothed_peaks>relevant_troughs[w-1]]
+                next_peak = next_peaks[0]
+                if len(next_peaks) > 0:
+                    if next_peak - relevant_troughs[w-1] < 3 and len(next_peaks) > 1: # if peak is too close <0.3ms
+                        next_peak = next_peaks[1]
+                    # check that there's not a deeper trough between this peak and the last peak
+                    if any(np.logical_and(smoothed_troughs>highest_smoothed_peaks[w-1]+2,smoothed_troughs<next_peak)):
+                        if np.min(smoothed_waveform[smoothed_troughs[np.logical_and(smoothed_troughs>highest_smoothed_peaks[w-1]+2,smoothed_troughs<next_peak)]]) < smoothed_waveform[relevant_troughs[w-1]]:
+                            next_troughs = smoothed_troughs[np.logical_and(smoothed_troughs>highest_smoothed_peaks[w-1]+2,smoothed_troughs<next_peak)]
+                            relevant_troughs[w-1] = next_troughs[np.argmin(smoothed_waveform[next_troughs])]
+                    next_troughs = smoothed_troughs[smoothed_troughs > next_peak]
+                    if w == 4 and len(next_troughs)==0:
+                        if next_peak < len(smoothed_waveform) - 10:
+                            relevant_troughs[w] = next_peak + 10 # if it's the very last peak, just make a trough up
+                        else:
+                            relevant_troughs[w] = int(next_peak + np.diff([next_peak,len(smoothed_waveform)]) - 1)
+                    elif len(next_troughs)>0:
+                        next_trough = next_troughs[0]
+                        if next_trough - next_peak < 3 and len(next_troughs) > 1: # if trough is too close <0.3ms
+                            next_trough = next_troughs[1]
+                        if any(np.logical_and(smoothed_peaks>next_peak,smoothed_peaks<next_trough)): # if there is another peak between peak and following trough
+                            if smoothed_waveform[smoothed_peaks[np.logical_and(smoothed_peaks>next_peak,smoothed_peaks<next_trough)]] > smoothed_waveform[next_peak]: # and it's higher than this peak
+                                next_peak = int(smoothed_peaks[np.logical_and(smoothed_peaks>next_peak,smoothed_peaks<next_trough)])
+                        highest_smoothed_peaks[w] = next_peak # find next peak
+                        # check there's not a higher peak between this trough and the last one
+                        if any(np.logical_and(smoothed_peaks > relevant_troughs[w-1]+2, smoothed_peaks < next_trough)):
+                            if np.max(smoothed_waveform[smoothed_peaks[np.logical_and(smoothed_peaks > relevant_troughs[w-1]+2, smoothed_peaks < next_trough)]]) > smoothed_waveform[highest_smoothed_peaks[w]]:
+                                next_peaks = smoothed_peaks[np.logical_and(smoothed_peaks > relevant_troughs[w-1]+2, smoothed_peaks < next_trough)]
+                                highest_smoothed_peaks[w] = next_peaks[np.argmax(smoothed_waveform[next_peaks])]
+                        if w < 4:
+                            next_peaks = smoothed_peaks[smoothed_peaks > next_trough]
+                            if len(next_peaks)>0:
+                                next_peak = next_peaks[0]
+                                if any(np.logical_and(smoothed_troughs > next_trough,smoothed_troughs < next_peak)):  # if there is another trough between trough and following peak
+                                    if smoothed_waveform[smoothed_troughs[np.logical_and(smoothed_troughs > next_trough,smoothed_troughs < next_peak)]] < smoothed_waveform[next_trough]:  # and it's lower than this trough
+                                        next_trough = int(smoothed_troughs[np.logical_and(smoothed_troughs > next_trough,smoothed_troughs < next_peak)])
+                                relevant_troughs[w] = next_trough # find trough after that
+                    if any(np.diff(highest_smoothed_peaks)>np.argmin(np.abs(time - 2))): # if there is a gap between peaks of more than 2ms
+                        for w in range(0):
+                            if (highest_smoothed_peaks[w+1]-highest_smoothed_peaks[w])>np.argmin(np.abs(time - 2)):
+                                # find an intermediate peak and trough
+                                temp_waveform = waveform.copy()
+                                temp_peaks, _ = find_peaks(temp_waveform, distance=n)
+                                temp_troughs, _ = find_peaks(-temp_waveform, distance=t)
+                                temp_peaks = temp_peaks[np.logical_and(temp_peaks>highest_smoothed_peaks[w]+5,temp_peaks<highest_smoothed_peaks[w+1]-5)]
+                                temp_troughs = temp_troughs[temp_troughs<highest_smoothed_peaks[w+1]-5]
+                                highest_smoothed_peaks[w+2:] = highest_smoothed_peaks[w+1:] # move values up 1 place
+                                relevant_troughs[w+2:] = relevant_troughs[w+1:]
+                                highest_smoothed_peaks[w+1] = temp_peaks[np.argmax(smoothed_waveform[temp_peaks])]
+                                temp_troughs = temp_troughs[temp_troughs>highest_smoothed_peaks[w+1]+1]
+                                relevant_troughs[w+1] = temp_troughs[np.argmin(smoothed_waveform[temp_troughs])]
+                    # check there's not a lower trough immediately after
+                    if relevant_troughs[4] != 0:
+                        if any(np.logical_and(smoothed_troughs>relevant_troughs[4],smoothed_troughs<relevant_troughs[4]+6)):
+                            if smoothed_waveform[smoothed_troughs[np.logical_and(smoothed_troughs>relevant_troughs[4],smoothed_troughs<relevant_troughs[4]+6)]] < smoothed_waveform[relevant_troughs[4]]:
+                                relevant_troughs[4] = int(smoothed_troughs[np.logical_and(smoothed_troughs>relevant_troughs[4],smoothed_troughs<relevant_troughs[4]+6)])
+            highest_smoothed_peaks = np.array(highest_smoothed_peaks[0:5])
+            highest_smoothed_peaks = highest_smoothed_peaks[highest_smoothed_peaks>0]
+            relevant_troughs = np.array(relevant_troughs[0:5])
+            relevant_troughs = relevant_troughs[relevant_troughs>0]
+
+        else:
+            relevant_troughs = [0, 0, 0, 0, 0, 0]
+            highest_smoothed_peaks = [0, 0, 0, 0, 0, 0]
+            for w in range(0,len(previous_troughs)-1):
+                sorted_indices = np.logical_and(smoothed_peaks>previous_peaks[w]-2,smoothed_peaks<previous_peaks[w]+2)
+                if any(sorted_indices): # if there are matching peaks
+                    next_peaks = smoothed_peaks[sorted_indices]
+                    # pick the highest peaks
+                    highest_smoothed_peaks[w] = int(next_peaks[np.argmax(smoothed_waveform[smoothed_peaks[sorted_indices]])])
+                else: # if not, just mark same timepoint
+                    highest_smoothed_peaks[w] = previous_peaks[w]
+                sorted_indices = np.logical_and(smoothed_troughs > previous_troughs[w] - 2,smoothed_troughs < previous_troughs[w] + 2)
+                if any(sorted_indices): # if there are matching troughs
+                    next_troughs = smoothed_troughs[sorted_indices]
+                    # pick the lowest one
+                    relevant_troughs[w] = int(next_troughs[np.argmin(smoothed_waveform[smoothed_troughs[sorted_indices]])])
+                else:
+                    relevant_troughs[w] = previous_troughs[w]
+            highest_smoothed_peaks = np.array(highest_smoothed_peaks[0:4])
+            highest_smoothed_peaks = highest_smoothed_peaks[highest_smoothed_peaks>0]
+            relevant_troughs = np.array(relevant_troughs[0:4])
+            relevant_troughs = relevant_troughs[relevant_troughs > 0]
+
+    except Exception as e:
+        print('Didnt work')
+        old_method = 1
+
+    if old_method ==  1: # use old peak finding method for weak signals or failures of first method
+        if prediction > 55:
+            start_point = prediction - 30
+        else:
+            start_point = 25
+        # do peak finding the original way
+        smoothed_peaks, _ = find_peaks(smoothed_waveform[start_point:])
+        smoothed_troughs, _ = find_peaks(-smoothed_waveform)
+        # ensure waves are within required range (no later than 8ms)
+        smoothed_peaks = smoothed_peaks[smoothed_peaks < 194-start_point]
+        smoothed_troughs = smoothed_troughs[smoothed_troughs < 194-start_point]
+        sorted_indices = np.argsort(smoothed_waveform[smoothed_peaks + start_point])
+        # first 4 ABRs should be in the first 6ms - so if there are 4 peaks within 5ms, prioritise them over later ones
+        if len(smoothed_peaks) >= 5:
+            if len(smoothed_peaks[sorted_indices[-5:]]>145-start_point) > 1 and len(smoothed_peaks<145-start_point) >= 5:
+                smoothed_peaks = smoothed_peaks[smoothed_peaks<145-start_point]
+                sorted_indices = np.argsort(smoothed_waveform[smoothed_peaks + start_point])
+            if len(smoothed_peaks) >= 5:
+                if all(smoothed_peaks[sorted_indices[-5:]]>49-start_point): # if highest 5 peaks are all after 2s
+                    sorted_indices[-5] = 0 # force the smallest peak to be the first peak
+            # final failsafe: if there are two peaks in 5th and 6th position of almost equal size
+            if len(smoothed_peaks) > 5:
+                if np.diff([smoothed_waveform[smoothed_peaks[sorted_indices[-6]]+start_point],smoothed_waveform[smoothed_peaks[sorted_indices[-5]]+start_point]]) < 0.5:
+                    # take the earlier peak
+                    smoothed_peaks[sorted_indices[-5]] = np.min([smoothed_peaks[sorted_indices[-5]],smoothed_peaks[sorted_indices[-6]]])
+        highest_smoothed_peaks = np.sort(smoothed_peaks[sorted_indices[-5:]] + start_point)
+        relevant_troughs = np.array([])
+        for p in range(len(highest_smoothed_peaks)):
+            c = 0
+            for t in smoothed_troughs:
+                if t > highest_smoothed_peaks[p]:
+                    if p != 4:
+                        try:
+                            if t < highest_smoothed_peaks[p + 1]:
+                                relevant_troughs = np.append(relevant_troughs, int(t))
+                                break
+                        except IndexError:
+                            pass
+                    else:
+                        relevant_troughs = np.append(relevant_troughs, int(t))
+                        break
+        relevant_troughs = relevant_troughs.astype('i')
+    return highest_smoothed_peaks, relevant_troughs, previous_peaks, previous_troughs
 
 
 peak_finding_model = CNN()
@@ -663,15 +825,18 @@ for file in files:
         y_max = 5.0
 
         for freq in distinct_freqs:
-            # Plot all waves at a single frequency
-            plot_waves_single_frequency(df, freq, y_min, y_max)
             # Plot all waves at single frequency offset in y (to appear stacked)
-            plot_waves_stacked(freq)
+            threshold = plot_waves_stacked(freq)
+            # Plot all waves at a single frequency
+            plot_waves_single_frequency(df, freq, y_min, y_max,threshold)
             # Plot all waves at single frequency as 3D surface (saves as html to open in browser)
             plot_3d_surface(df, freq, y_min, y_max)
-            for db in distinct_dbs:
+            for db in sorted(distinct_dbs, reverse=True):
                 # Plot all waves at each frequency and dB
-                plot_waves_single_tuple(freq, db, y_min, y_max)
+                if db == np.max(distinct_dbs):
+                    previous_peaks = []
+                    previous_troughs = []
+                previous_peaks,previous_troughs = plot_waves_single_tuple(freq, db, y_min, y_max,previous_peaks,previous_troughs)
         # Extract important metrics
         metrics_data = make_metrics_table(df, distinct_freqs, distinct_dbs)
         # Append to metrics table for all click/PT sessions
