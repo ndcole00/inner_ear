@@ -175,6 +175,7 @@ def arfread(PATH, **kwargs):
 
     return data
 
+
 # For plotting ABR curves
 def interpolate_and_smooth(final, target_length=244):
     if len(final) > target_length:
@@ -305,7 +306,7 @@ def plot_waves_single_tuple(freq, db, y_min, y_max, previous_peaks, previous_tro
     return previous_peaks,previous_troughs
 
 
-def plot_3d_surface(df, freq, y_min, y_max):
+def plot_3d_surface(df, freq, y_min, y_max,threshold=None):
     try:
         fig = go.Figure()
         db_levels = sorted(df['Level(dB)'].unique(), reverse=True)
@@ -364,8 +365,7 @@ def make_metrics_table(df, freqs, db_levels):
             threshold = calculate_hearing_threshold(df, freq)
         except:
             threshold = np.nan
-        db_levels = sorted(db_levels, reverse=True)
-        for db in db_levels:
+        for db in sorted(db_levels, reverse=True):
             if db == 90:
                 previous_peaks = []
                 previous_troughs = []
