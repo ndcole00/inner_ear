@@ -157,6 +157,7 @@ def plot_waves_stacked(df,freq):
     db_levels = sorted(unique_dbs, reverse=True)
     max_db = db_levels[0]
     db_thresh = max_db
+    amplitude = []
 
     for i, db in enumerate(db_levels):
         try:
@@ -172,6 +173,7 @@ def plot_waves_stacked(df,freq):
                 final_normalized = final / max_value
                 hz = np.linspace(0, range_hz, len(final_normalized))
                 if db == max_db:  # first plot only
+
                     # Find peaks in highest dB trace
                     # Normalize the waveform
                     peaks,_ = find_peaks(final_normalized,height=final_normalized[0]+.2)
@@ -189,15 +191,33 @@ def plot_waves_stacked(df,freq):
                             freq_idx = (np.abs(temp_hz - (freq * 1.09))).argmin()  # manually find where F2 should be
                             F2 = np.abs(peaks - freq_idx).argmin() # find the peak that corresponds
                             peaks = peaks[[F1,F2]]
-                    F1 = peaks[-2]
-                    F2 = peaks[-1]
-                    if len(peaks) == 3: # peak finding should hopefully find the DP peak as well as F1 and F2
+                    if len(peaks) < 2:
+                        temp_hz = np.asarray(hz)
+                        F1 = (np.abs(temp_hz - (freq * .909))).argmin()  # manually find where F1 should be
+                        F2 = (np.abs(temp_hz - (freq * 1.09))).argmin()  # manually find where F2 should be
+                    else:
+                        F1 = peaks[-2]
+                        F2 = peaks[-1]
+                    if round(F2/F1,1) != 1.2: # F2:F1 should have a ratio of 1.2
+                        temp_hz = np.asarray(hz)
+                        F1 = (np.abs(temp_hz - (freq * .909))).argmin()  # manually find where F1 should be
+                        F2 = (np.abs(temp_hz - (freq * 1.09))).argmin()  # manually find where F2 should be
+                    # Then check that F1 and F2 correspond to the actual peaks in the trace
+                    temp = np.array(final_normalized)
+                    temp[0:F1-5] = 0
+                    temp[F1+5:] = 0
+                    F1 = temp.argmax()
+                    temp = np.array(final_normalized)
+                    temp[0:F2 - 5] = 0
+                    temp[F2+5:] = 0
+                    F2 = temp.argmax()
+
+                    if len(peaks) == 3 and peaks[0] == round(2*F1-F2,0): # peak finding should hopefully find the DP peak as well as F1 and F2
                         DP = peaks[0]
                     else: # but if it doesn't, calculate
                         DP = 2*F1-F2
                     prev_thresh = False
-                    for idx, db_idx in enumerate(
-                            unique_dbs):  # now cycle through traces from lowest dB to find threshold
+                    for idx, db_idx in enumerate(unique_dbs):  # now cycle through traces from lowest dB to find threshold
                         ff = df[(df['Freq(Hz)'] == freq) & (df['Level(dB)'] == db_idx)]
                         ix = ff.index.values[-1]
                         trace = df.loc[ix, '0':].dropna()
@@ -207,15 +227,18 @@ def plot_waves_stacked(df,freq):
                                                                                                    DP + 13)])])  # find std of trace either side of expected peak
                         mean_vals = np.mean(trace[np.concatenate([np.arange(DP - 13, DP - 3), np.arange(DP + 3,
                                                                                                        DP + 13)])])  # find mean of trace either side of expected peak
-                        #max_val = np.max(trace[[DP-2,DP-1,DP,DP+1,DP+2]])  # find max value at expected frequency range
-                        if trace[DP] > (mean_vals + st_dev * 2):  # if peak is greater than mean + [2 * sd]
-                            if prev_thresh and idx>0: # check that one dB above also has acceptable peak
-                                db_thresh = unique_dbs[idx - 1]
-                                break
-                            prev_thresh = True
-                        else:
-                            prev_thresh = False
+                        max_val = np.max(trace[[DP,DP-1,DP,DP+1]])  # find max value at expected frequency range, allow for a little error
+                        if max_val > (mean_vals + st_dev * 2):  # if peak is greater than mean + [2 * sd]
+                            #if prev_thresh and idx>0: # check that one dB above also has acceptable peak
+                            db_thresh = unique_dbs[idx]
+                            break
+                          #  prev_thresh = True
+                     #   else:
+                     #       prev_thresh = False
 
+                trace = final
+                trace = trace.to_numpy()
+                amplitude.append(np.max(trace[np.arange(DP-1,DP+2)]) - np.mean([trace[DP-3],trace[DP+3]])) # find mean of trace either side of expected peak
 
 
                 # Apply vertical offset
@@ -268,7 +291,7 @@ def plot_waves_stacked(df,freq):
     fig.write_image(os.path.join(saveDir,f'stacked_waves_{freq}Hz_{df.name}.pdf'))
     fig.write_image(os.path.join(saveDir, f'stacked_waves_{freq}Hz_{df.name}.jpg'))
 
-    return db_thresh
+    return db_thresh, amplitude
 
 
 def get_str(data):
@@ -285,7 +308,7 @@ files = fd.askopenfilenames(title="Select .arf files | Sélectionnez les fichier
 saveRoot = fd.askdirectory(title='Select save directory | Sélectionnez le répertoire de sauvegarde')
 counter = 1
 metrics_data_all = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], 'Mouse Name': [], 'Timepoint': [],
-                        'Frequency (Hz)': [], 'dB Level': [], 'DP Threshold': []} # make empty dataframe
+                        'Frequency (Hz)': [], 'dB Level': [], 'DP Threshold': [], 'DP Amplitude': []} # make empty dataframe
 for file in files:
     annotations = []
     dfs = []
@@ -313,7 +336,7 @@ for file in files:
                 rows.append(row)
 
         metrics_data = {'File Name': [], 'Date': [], 'Session Type': [], 'Ear': [], 'Mouse Name': [], 'Timepoint': [],
-                        'Frequency (Hz)': [], 'dB Level': [], 'DP Threshold': []}
+                        'Frequency (Hz)': [], 'dB Level': [], 'DP Threshold': [], 'DP Amplitude': []}
         # Make dataframe with all data from session
         df = pd.DataFrame(rows)
         df.name = file.split('/')[-1][0:-4]
@@ -337,8 +360,10 @@ for file in files:
 
         # Cycle through frequencies
         for freq in distinct_freqs:
-            db_thresh = plot_waves_stacked(df,freq)
-            for db in distinct_dbs:
+            [db_thresh,amplitude] = plot_waves_stacked(df,freq)
+            amplitude = np.abs(amplitude)
+            amplitude = np.flip(amplitude)
+            for i,db in enumerate(distinct_dbs):
                 # Update datatable for this session
                 metrics_data['File Name'].append(df.name)
                 metrics_data['Date'].append(df.name.split('_')[0])
@@ -349,6 +374,7 @@ for file in files:
                 metrics_data['Frequency (Hz)'].append(freq)
                 metrics_data['dB Level'].append(db)
                 metrics_data['DP Threshold'].append(db_thresh)
+                metrics_data['DP Amplitude'].append(amplitude[i])
 
         # Append to across sessions metrics data
         for key, val in dict.items(metrics_data):
