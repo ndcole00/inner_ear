@@ -486,7 +486,7 @@ def get_str(data):
 def calculate_hearing_threshold(df, freq, baseline_level=100):
 
     db_column = 'Level(dB)'
-    thresholding_model = load_model('./models/abr_cnn_aug_norm_std.keras')
+    thresholding_model = load_model('C:/Users/ULiege/Documents/inner_ear/abr_analysis/models/abr_cnn_aug_norm_std.keras')
     thresholding_model.steps_per_execution = 1
     # Filter DataFrame to include only data for the specified frequency
     df_filtered = df[df['Freq(Hz)'] == freq]

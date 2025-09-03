@@ -1,3 +1,5 @@
+
+
 import warnings
 import io
 import plotly.io as pio
@@ -395,18 +397,23 @@ def make_metrics_table(df, freqs, db_levels,all_thresholds):
     return metrics_data
 
 def plot_waves_stacked(freq):
-    fig = go.Figure()
+
     # Get unique dB levels and color palette
     unique_dbs = sorted(df['Level(dB)'].unique())
     num_dbs = len(unique_dbs)
     vertical_spacing = 25 / num_dbs
     db_offsets = {db: y_min + i * vertical_spacing for i, db in enumerate(unique_dbs)}
     glasbey_colors = cc.glasbey[:num_dbs]
+    # for manual threshold judgement, make individual suplots so that each dB trace has its own scale
+    threshfig = make_subplots(rows=int(np.ceil(num_dbs/3)),cols=3)
+
 
     db_levels = sorted(unique_dbs, reverse=True)
     max_db = db_levels[0]
+    rowIdx = 1
+    colIdx = 1
 
-    # first plot the stacked waves for the user to view
+    # first plot the waves at each dB for the user to select threshold - one dB per subplot
     for i, db in enumerate(db_levels):
         khz = df[(df['Freq(Hz)'] == freq) & (df['Level(dB)'] == db)]
 
@@ -414,25 +421,18 @@ def plot_waves_stacked(freq):
             index = khz.index.values[-1]
             final = df.loc[index, '0':].dropna()
             final = pd.to_numeric(final, errors='coerce')
-            final = interpolate_and_smooth(final)
-
-            # Normalize the waveform
-            if db == max_db:
-                max_value = np.max(np.abs(final))
-            final_normalized = final / max_value
-            # Apply vertical offset
-            y_values = final_normalized + db_offsets[db]
-
-            # Plot the waveform
+            y_values = interpolate_and_smooth(final)
+            # Plot the waveform for each dB
             color_scale = glasbey_colors[i]
-            fig.add_trace(go.Scatter(x=np.linspace(0, time_scale, len(y_values)),
+            threshfig.add_trace(go.Scatter(x=np.linspace(0, time_scale, len(y_values)),
                              y=y_values,
                              mode='lines',
                              name=f'{int(db)} dB',
                              line=dict(color=color_scale),
-                                     showlegend=False))
+                                     showlegend=False),
+                                row=rowIdx, col=colIdx)
 
-            fig.add_annotation(
+            threshfig.add_annotation(
                     x=10,
                     y=y_values[-1] + 0.5,
                     xref="x",
@@ -440,24 +440,30 @@ def plot_waves_stacked(freq):
                     text=f"{int(db)} dB",
                     showarrow=False,
                     font=dict(size=10, color=color_scale),
+                    row=rowIdx, col=colIdx,
                     xanchor="right"
                         )
-    fig.update_layout(title=dict(text=f'Select ABR threshold - random file {counter} of {len(files)}', font = dict(family='Helvetica', size=15)),
+            colIdx = colIdx + 1
+            if colIdx > 3:
+                colIdx = 1
+                rowIdx = rowIdx + 1
+
+    threshfig.update_layout(title=dict(text=f'Select ABR threshold - random file {counter} of {len(files)}', font = dict(family='Helvetica', size=15)),
               xaxis_title='Time (ms)',
               yaxis_title='Voltage (μV)',
-              width=400,
-              height=700,
+              width=1300,
+              height=1300,
               yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
               xaxis=dict(showgrid=False, zeroline=False))
 
     # prepare figure as image
     buf = io.BytesIO()
-    pio.write_image(fig, buf)
+    pio.write_image(threshfig, buf)
     img =  Image.open(buf)
 
     # create GUI with buttons for selecting hearing threshold manually
     app = tkinter.Tk() # define this each time so that it opens a separate window
-    app.geometry("450x800+10+10")
+    app.geometry("1400x1300+10+10")
     image = ImageTk.PhotoImage(img)
     imgbox = tkinter.Label(app,fg="black", compound="bottom")
     imgbox.place(x=15,y=15)
@@ -468,12 +474,66 @@ def plot_waves_stacked(freq):
     def close_app(): # when accept button is pressed
         app.destroy()
 
+    def stacked_waves_button():
+
+        # Plot the stacked waves, to help the user decide
+        fig = go.Figure()
+
+        for i, db in enumerate(db_levels):
+            try:
+                khz = df[(df['Freq(Hz)'] == freq) & (df['Level(dB)'] == db)]
+
+                if not khz.empty:
+                    index = khz.index.values[-1]
+                    final = df.loc[index, '0':].dropna()
+                    final = pd.to_numeric(final, errors='coerce')
+                    final = interpolate_and_smooth(final)
+
+                    # Normalize the waveform
+                    if db == max_db:
+                        max_value = np.max(np.abs(final))
+                    final_normalized = final / max_value
+                    # Apply vertical offset
+                    y_values = final_normalized + db_offsets[db]
+
+                    # Plot the waveform
+                    color_scale = glasbey_colors[i]
+                    fig.add_trace(go.Scatter(x=np.linspace(0, time_scale, len(y_values)),
+                                             y=y_values,
+                                             mode='lines',
+                                             name=f'{int(db)} dB',
+                                             line=dict(color=color_scale)))
+
+                    fig.add_annotation(
+                        x=10,
+                        y=y_values[-1] + 0.5,
+                        xref="x",
+                        yref="y",
+                        text=f"{int(db)} dB",
+                        showarrow=False,
+                        font=dict(size=10, color=color_scale),
+                        xanchor="right"
+                    )
+            except Exception as e:
+                print('Error plotting stacked waves')
+            fig.update_layout(
+                title=dict(text=f'{df.name.split("/")[-1]} - Frequency: {freq} Hz',
+                           font=dict(family='Helvetica', size=15)),
+                xaxis_title='Time (ms)',
+                yaxis_title='Voltage (μV)',
+                width=400,
+                height=700,
+                yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+                xaxis=dict(showgrid=False, zeroline=False))
+
+        fig.show()
+
     def create_buttons(db_levels, glasbey_colors):
         button = tkinter.Button(app,
                                     text='No threshold',
                                     command=lambda d=100: clicked.append(d),
                                     activebackground='white')
-        button.place(x=350,y=100)
+        button.place(x=1300,y=100)
         # Create a button for each db
         for i, db in enumerate(db_levels):
             button = tkinter.Button(app,
@@ -481,13 +541,19 @@ def plot_waves_stacked(freq):
                                     command=lambda d=db: clicked.append(d),
                                     fg=glasbey_colors[i],
                                     activebackground='white')
-            button.place(x=350,y=120+(i+1)*25)
+            button.place(x=1300,y=120+(i+1)*25)
         button = tkinter.Button(app,
                                 text='ACCEPT',
                                 command=close_app,
                                 activebackground='white')
-        button.place(x=350,y=125+(len(db_levels)+2)*25)
+        button.place(x=1300, y=125 + (len(db_levels) + 2) * 25)
+        button = tkinter.Button(app,
+                                text='Plot stacked waves',
+                                command=stacked_waves_button,
+                                activebackground='grey')
+        button.place(x=1270,y=700+(len(db_levels)+2)*25)
     create_buttons(db_levels,glasbey_colors)
+
     # Run the app
     app.mainloop()
 
@@ -501,6 +567,8 @@ def plot_waves_stacked(freq):
     for proc in psutil.process_iter():
         if proc.name() == "display":
             proc.kill()
+
+    fig = go.Figure()
 
     for i, db in enumerate(db_levels):
         try:
