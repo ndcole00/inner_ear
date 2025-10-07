@@ -521,7 +521,7 @@ def plot_waves_stacked(freq):
                            font=dict(family='Helvetica', size=15)),
                 xaxis_title='Time (ms)',
                 yaxis_title='Voltage (μV)',
-                width=400,
+                widffvth=400,
                 height=700,
                 yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
                 xaxis=dict(showgrid=False, zeroline=False))
@@ -558,7 +558,7 @@ def plot_waves_stacked(freq):
     app.mainloop()
 
     if len(clicked) == 0:
-        threshold = 100
+        threshold = 100.0
     else:
         threshold = clicked[-1] # take last value, in case user changed their mind
 
@@ -908,12 +908,12 @@ for file in files:
                 # Plot all waves at single frequency offset in y (to appear stacked)
                 threshold = plot_waves_stacked(freq)  # use this to calculate threshold as well
                 all_thresholds_temp.append(threshold)
-            all_thresholds = all_thresholds_temp
-            if freq != 'Click':
-                for idx in range(len(all_thresholds)):
+            all_thresholds = all_thresholds_temp.copy()
+            if freq != 'Click': # unrandomise the thresholds order
+                for idx in range(len(all_thresholds_temp)):
                     thresh_idx = random_freqs[idx]==distinct_freqs
                     thresh_idx = [i for i, j in enumerate(thresh_idx, 1) if j] # convert this to integer
-                    all_thresholds[idx] = all_thresholds_temp[thresh_idx[0]-1]
+                    all_thresholds[thresh_idx[0]-1] = all_thresholds_temp[idx]
             # Now use these thresholds to plot everything else
             for freq in distinct_freqs:
                 # Plot all waves at a single frequency
